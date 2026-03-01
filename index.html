@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Clipboard Sync</title>
+    <title>Universal Sync Pro</title>
     <style>
         :root {
             --bg: #1e1e2e;
@@ -12,102 +12,118 @@
             --success: #a6e3a1;
             --error: #f38ba8;
             --surface: #313244;
+            --overlay: rgba(255, 255, 255, 0.05);
         }
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
         body {
             background-color: var(--bg);
             color: var(--text);
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
             height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        /* Split Screen UI */
+        .half {
+            flex: 1;
             display: flex;
             flex-direction: column;
             justify-content: center;
             align-items: center;
-            text-align: center;
             cursor: pointer;
-            overflow: hidden;
-            transition: background-color 0.3s ease;
-            user-select: none;
+            transition: background 0.2s;
+            position: relative;
         }
 
-        body:active {
-            background-color: #24273a;
-        }
+        .push-zone { border-bottom: 2px dashed var(--surface); }
+        .push-zone:active { background: rgba(166, 227, 161, 0.1); }
+        .pull-zone:active { background: rgba(137, 180, 250, 0.1); }
 
-        .container {
-            max-width: 90%;
-            pointer-events: none; /* Let clicks pass through to body */
-        }
+        .icon { font-size: 2.5rem; margin-bottom: 10px; }
+        .label { font-weight: 600; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; }
 
-        h1 {
-            font-size: 1.8rem;
-            margin-bottom: 1.5rem;
-            line-height: 1.4;
-            font-weight: 600;
-        }
-
-        .preview-box {
+        /* Center Display Card */
+        .preview-card {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             background: var(--surface);
             padding: 1.5rem;
-            border-radius: 12px;
-            font-family: monospace;
-            font-size: 1.1rem;
-            color: var(--accent);
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            border-radius: 16px;
+            width: 85%;
+            max-width: 400px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             border: 1px solid rgba(255,255,255,0.1);
-            max-width: 100%;
+            pointer-events: none; /* Clicks pass to zones */
+            z-index: 10;
+        }
+
+        .preview-text {
+            font-family: 'Fira Code', monospace;
+            color: var(--accent);
             word-break: break-all;
+            font-size: 0.95rem;
+            text-align: center;
         }
 
         .status-msg {
             position: fixed;
-            bottom: 2rem;
+            bottom: 20px;
             left: 50%;
-            transform: translateX(-50%);
-            padding: 0.8rem 1.5rem;
-            border-radius: 50px;
+            transform: translateX(-50%) translateY(100px);
+            padding: 12px 24px;
+            border-radius: 12px;
             font-weight: bold;
-            opacity: 0;
-            transition: opacity 0.3s ease, transform 0.3s ease;
-            pointer-events: none;
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 100;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.3);
         }
 
-        .status-msg.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(-10px);
-        }
+        .status-msg.show { transform: translateX(-50%) translateY(0); }
+        .success { background: var(--success); color: #111; }
+        .error { background: var(--error); color: #fff; }
 
-        .success { background-color: var(--success); color: #111; }
-        .error { background-color: var(--error); color: #111; }
-
-        .device-info {
-            margin-top: 1rem;
-            font-size: 0.8rem;
-            opacity: 0.5;
+        .device-tag {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            font-size: 0.7rem;
+            opacity: 0.4;
         }
     </style>
 </head>
 <body>
 
-    <div class="container">
-        <h1 id="main-status">Initializing Sync...</h1>
-        <div class="preview-box" id="preview-text">Waiting for data...</div>
-        <div class="device-info" id="device-type">Detecting device...</div>
+    <div class="half push-zone" id="btn-push">
+        <div class="icon">☁️</div>
+        <div class="label">Push to Cloud</div>
+        <div style="font-size: 0.7rem; opacity: 0.5;">Upload your local clipboard</div>
+    </div>
+
+    <div class="preview-card">
+        <div style="font-size: 0.7rem; opacity: 0.5; margin-bottom: 8px; text-align: center;">CLOUD CONTENT</div>
+        <div class="preview-text" id="preview-text">Connecting...</div>
+    </div>
+
+    <div class="half pull-zone" id="btn-pull">
+        <div class="icon">📲</div>
+        <div class="label">Pull from Cloud</div>
+        <div style="font-size: 0.7rem; opacity: 0.5;">Download to your device</div>
     </div>
 
     <div id="toast" class="status-msg"></div>
+    <div class="device-tag" id="device-tag">Detecting...</div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getDatabase, ref, onValue, set } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-        // Firebase Configuration
         const firebaseConfig = {
             apiKey: "AIzaSyD_1mKhifIdkrM4mGxbfOobDLhifJMpyO4",
             authDomain: "copy-it-66544.firebaseapp.com",
@@ -119,96 +135,62 @@
             databaseURL: "https://copy-it-66544-default-rtdb.firebaseio.com"
         };
 
-        // Initialize Firebase
         const app = initializeApp(firebaseConfig);
         const db = getDatabase(app);
-        const clipboardRef = ref(db, 'clipboard_data');
+        const clipRef = ref(db, 'clipboard_data');
 
-        // UI Elements
-        const statusEl = document.getElementById('main-status');
         const previewEl = document.getElementById('preview-text');
-        const deviceEl = document.getElementById('device-type');
         const toastEl = document.getElementById('toast');
+        const deviceTag = document.getElementById('device-tag');
 
-        let currentDBValue = "";
-        let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        let cloudText = "";
+        const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
+        deviceTag.textContent = isMobile ? "MOBILE MODE" : "PC MODE";
 
-        // Helper: Show Toast
-        function showToast(message, type = 'success') {
-            toastEl.textContent = message;
+        function notify(msg, type = 'success') {
+            toastEl.textContent = msg;
             toastEl.className = `status-msg show ${type}`;
-            setTimeout(() => {
-                toastEl.classList.remove('show');
-            }, 2500);
+            setTimeout(() => toastEl.classList.remove('show'), 2000);
         }
 
-        // 1. Firebase Listener (Global)
-        onValue(clipboardRef, (snapshot) => {
-            const data = snapshot.val();
-            currentDBValue = data || "";
-            
-            // Truncate preview to 50 chars
-            const displayValue = currentDBValue.length > 50 
-                ? currentDBValue.substring(0, 50) + "..." 
-                : currentDBValue || "Clipboard is empty";
-            
-            previewEl.textContent = displayValue;
+        // Listen for Cloud Changes
+        onValue(clipRef, (snap) => {
+            cloudText = snap.val() || "";
+            previewEl.textContent = cloudText.length > 80 ? cloudText.substring(0, 80) + "..." : (cloudText || "Empty Cloud");
         });
 
-        // 2. Logic Branching based on Device
-        if (isMobile) {
-            // MOBILE LOGIC
-            deviceEl.textContent = "Mode: Mobile Receiver";
-            statusEl.innerHTML = "📥 New text ready!<br>Tap anywhere to copy.";
+        // UPLOAD LOGIC (PUSH)
+        async function pushToCloud() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (!text) return notify("Clipboard is empty", "error");
+                if (text === cloudText) return notify("Already in sync");
+                
+                await set(clipRef, text);
+                notify("Cloud Updated! 🚀");
+            } catch (err) {
+                notify("Click to grant permission", "error");
+            }
+        }
 
-            document.body.addEventListener('click', async () => {
-                if (!currentDBValue) {
-                    showToast("Nothing to copy!", "error");
-                    return;
-                }
+        // DOWNLOAD LOGIC (PULL)
+        async function pullFromCloud() {
+            if (!cloudText) return notify("Cloud is empty", "error");
+            try {
+                await navigator.clipboard.writeText(cloudText);
+                notify("Device Updated! ✅");
+            } catch (err) {
+                notify("Failed to write to clipboard", "error");
+            }
+        }
 
-                try {
-                    await navigator.clipboard.writeText(currentDBValue);
-                    showToast("Copied to phone clipboard!");
-                } catch (err) {
-                    console.error("Copy failed", err);
-                    showToast("Tap again or check permissions", "error");
-                }
-            });
+        // Event Listeners
+        document.getElementById('btn-push').addEventListener('click', pushToCloud);
+        document.getElementById('btn-pull').addEventListener('click', pullFromCloud);
 
-        } else {
-            // PC LOGIC
-            deviceEl.textContent = "Mode: PC Auto-Sync";
-            statusEl.textContent = "💻 PC Mode: Switch to this tab to auto-sync clipboard.";
-
-            window.addEventListener('focus', async () => {
-                try {
-                    const clipboardText = await navigator.clipboard.readText();
-                    
-                    if (clipboardText && clipboardText !== currentDBValue) {
-                        await set(clipboardRef, clipboardText);
-                        showToast("Clipboard synced to Cloud!");
-                    }
-                } catch (err) {
-                    console.error("Paste failed", err);
-                    statusEl.innerHTML = "⚠️ Permission Denied<br><small>Click anywhere to enable or check browser settings</small>";
-                }
-            });
-
-            // Fallback for first interaction to request permissions
-            document.body.addEventListener('click', async () => {
-                try {
-                    const text = await navigator.clipboard.readText();
-                    if (text !== currentDBValue) {
-                        await set(clipboardRef, text);
-                        showToast("Manual Sync Successful!");
-                    } else {
-                        showToast("Already in sync");
-                    }
-                } catch (err) {
-                    showToast("Please allow clipboard access in browser", "error");
-                }
-            });
+        // Auto-Sync for PC on focus
+        if (!isMobile) {
+            window.addEventListener('focus', pushToCloud);
         }
     </script>
 </body>
