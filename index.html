@@ -129,6 +129,15 @@
             opacity: 0.4;
         }
 
+        .upload-hint {
+            margin-top: 8px;
+            font-size: 0.65rem;
+            background: rgba(255,255,255,0.1);
+            padding: 4px 10px;
+            border-radius: 4px;
+            pointer-events: auto;
+        }
+
         /* Hidden file input for mobile support */
         #file-input { display: none; }
     </style>
@@ -141,6 +150,7 @@
         <div class="icon">☁️</div>
         <div class="label">Push to Cloud</div>
         <div style="font-size: 0.7rem; opacity: 0.5;">Upload Text, Image, or File</div>
+        <div class="upload-hint" id="file-trigger">Click here to browse files</div>
     </div>
 
     <div class="preview-card">
@@ -186,6 +196,7 @@
         const toastEl = document.getElementById('toast');
         const deviceTag = document.getElementById('device-tag');
         const fileInput = document.getElementById('file-input');
+        const fileTrigger = document.getElementById('file-trigger');
 
         let cloudData = { type: 'text', content: '', name: '' };
         const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
@@ -239,10 +250,17 @@
         });
 
         // UPLOAD LOGIC
-        async function pushToCloud() {
+        async function pushToCloud(e) {
+            // If the user specifically clicked the "Browse" button, skip clipboard
+            if (e && e.target.id === 'file-trigger') {
+                fileInput.click();
+                return;
+            }
+
             try {
                 // PC/Clipboard support
                 const items = await navigator.clipboard.read();
+                let foundContent = false;
                 for (const item of items) {
                     const imageType = item.types.find(type => type.startsWith('image/'));
                     if (imageType) {
@@ -250,24 +268,36 @@
                         const base64 = await blobToBase64(blob);
                         if (base64.length > 5 * 1024 * 1024) return notify("Image too large (>5MB)", "error");
                         await set(clipRef, { type: 'image', content: base64 });
-                        return notify("Image Pushed! 🖼️");
+                        notify("Image Pushed! 🖼️");
+                        foundContent = true;
+                        break;
                     }
                     
                     if (item.types.includes('text/plain')) {
                         const blob = await item.getType('text/plain');
                         const text = await blob.text();
-                        if (text === cloudData.content) return notify("Already in sync");
-                        await set(clipRef, { type: 'text', content: text });
-                        return notify("Text Pushed! 🚀");
+                        if (text) {
+                            if (text === cloudData.content) notify("Already in sync");
+                            else {
+                                await set(clipRef, { type: 'text', content: text });
+                                notify("Text Pushed! 🚀");
+                            }
+                            foundContent = true;
+                            break;
+                        }
                     }
                 }
+                
+                // If nothing in clipboard, trigger file picker
+                if (!foundContent) fileInput.click();
+
             } catch (err) {
-                // If clipboard fails (like on mobile where reading is restricted), try file picker
+                // Fallback for mobile or blocked permissions
                 fileInput.click();
             }
         }
 
-        // Handle File Input (Fallback/Explicit files)
+        // Handle File Input (Explicit files from computer/phone storage)
         fileInput.onchange = async (e) => {
             const file = e.target.files[0];
             if (!file) return;
@@ -300,17 +330,14 @@
 
                     if (cloudData.type === 'image') {
                         try {
-                            // Try writing to clipboard if it's an image
                             await navigator.clipboard.write([
                                 new ClipboardItem({ [blob.type]: blob })
                             ]);
                             notify("Image Downloaded to Clipboard! 🖼️");
                         } catch (e) {
-                            // Fallback to file download
                             triggerDownload(blob, cloudData.name || 'image.png');
                         }
                     } else {
-                        // For generic files, trigger a browser download
                         triggerDownload(blob, cloudData.name || 'file.bin');
                     }
                 } else {
@@ -339,7 +366,22 @@
         document.getElementById('btn-pull').addEventListener('click', pullFromCloud);
 
         if (!isMobile) {
-            window.addEventListener('focus', pushToCloud);
+            window.addEventListener('focus', (e) => {
+                // On auto-focus, we don't want to trigger the file picker if clipboard is empty
+                // So we use a silent version of push
+                navigator.clipboard.read().then(items => {
+                    for (const item of items) {
+                        if (item.types.includes('text/plain')) {
+                             item.getType('text/plain').then(blob => blob.text()).then(text => {
+                                 if (text && text !== cloudData.content) {
+                                     set(clipRef, { type: 'text', content: text });
+                                     notify("Auto-Synced Text! 🚀");
+                                 }
+                             });
+                        }
+                    }
+                }).catch(() => {});
+            });
         }
     </script>
 </body>
