@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Universal Sync Pro</title>
+    <title>Universal Sync Pro + Any File</title>
     <style>
         :root {
             --bg: #1e1e2e;
@@ -28,7 +28,6 @@
             user-select: none;
         }
 
-        /* Split Screen UI */
         .half {
             flex: 1;
             display: flex;
@@ -38,6 +37,7 @@
             cursor: pointer;
             transition: background 0.2s;
             position: relative;
+            z-index: 1;
         }
 
         .push-zone { border-bottom: 2px dashed var(--surface); }
@@ -54,21 +54,52 @@
             left: 50%;
             transform: translate(-50%, -50%);
             background: var(--surface);
-            padding: 1.5rem;
+            padding: 1rem;
             border-radius: 16px;
             width: 85%;
             max-width: 400px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             border: 1px solid rgba(255,255,255,0.1);
-            pointer-events: none; /* Clicks pass to zones */
+            pointer-events: none;
             z-index: 10;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .preview-content {
+            width: 100%;
+            max-height: 200px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 8px;
+            background: rgba(0,0,0,0.2);
+        }
+
+        #preview-img {
+            max-width: 100%;
+            max-height: 160px;
+            object-fit: contain;
+            display: none;
         }
 
         .preview-text {
             font-family: 'Fira Code', monospace;
             color: var(--accent);
             word-break: break-all;
-            font-size: 0.95rem;
+            font-size: 0.85rem;
+            text-align: center;
+            padding: 10px;
+        }
+
+        .file-info {
+            font-size: 0.75rem;
+            color: var(--accent);
+            margin-top: 5px;
+            display: none;
             text-align: center;
         }
 
@@ -83,6 +114,7 @@
             transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
             z-index: 100;
             box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+            white-space: nowrap;
         }
 
         .status-msg.show { transform: translateX(-50%) translateY(0); }
@@ -96,25 +128,34 @@
             font-size: 0.7rem;
             opacity: 0.4;
         }
+
+        /* Hidden file input for mobile support */
+        #file-input { display: none; }
     </style>
 </head>
 <body>
 
+    <input type="file" id="file-input">
+
     <div class="half push-zone" id="btn-push">
         <div class="icon">☁️</div>
         <div class="label">Push to Cloud</div>
-        <div style="font-size: 0.7rem; opacity: 0.5;">Upload your local clipboard</div>
+        <div style="font-size: 0.7rem; opacity: 0.5;">Upload Text, Image, or File</div>
     </div>
 
     <div class="preview-card">
         <div style="font-size: 0.7rem; opacity: 0.5; margin-bottom: 8px; text-align: center;">CLOUD CONTENT</div>
-        <div class="preview-text" id="preview-text">Connecting...</div>
+        <div class="preview-content">
+            <img id="preview-img" alt="Clipboard Image">
+            <div class="preview-text" id="preview-text">Connecting...</div>
+            <div id="file-details" class="file-info"></div>
+        </div>
     </div>
 
     <div class="half pull-zone" id="btn-pull">
         <div class="icon">📲</div>
         <div class="label">Pull from Cloud</div>
-        <div style="font-size: 0.7rem; opacity: 0.5;">Download to your device</div>
+        <div style="font-size: 0.7rem; opacity: 0.5;">Download to Device</div>
     </div>
 
     <div id="toast" class="status-msg"></div>
@@ -140,10 +181,13 @@
         const clipRef = ref(db, 'clipboard_data');
 
         const previewEl = document.getElementById('preview-text');
+        const previewImg = document.getElementById('preview-img');
+        const fileDetails = document.getElementById('file-details');
         const toastEl = document.getElementById('toast');
         const deviceTag = document.getElementById('device-tag');
+        const fileInput = document.getElementById('file-input');
 
-        let cloudText = "";
+        let cloudData = { type: 'text', content: '', name: '' };
         const isMobile = /Android|iPhone|iPad/i.test(navigator.userAgent);
         deviceTag.textContent = isMobile ? "MOBILE MODE" : "PC MODE";
 
@@ -155,40 +199,145 @@
 
         // Listen for Cloud Changes
         onValue(clipRef, (snap) => {
-            cloudText = snap.val() || "";
-            previewEl.textContent = cloudText.length > 80 ? cloudText.substring(0, 80) + "..." : (cloudText || "Empty Cloud");
+            const data = snap.val();
+            if (!data) {
+                cloudData = { type: 'text', content: '', name: '' };
+                previewEl.textContent = "Empty Cloud";
+                previewEl.style.display = "block";
+                previewImg.style.display = "none";
+                fileDetails.style.display = "none";
+                return;
+            }
+
+            cloudData = typeof data === 'string' ? { type: 'text', content: data } : data;
+
+            if (cloudData.type === 'image') {
+                previewImg.src = cloudData.content;
+                previewImg.style.display = "block";
+                previewEl.style.display = "none";
+                fileDetails.style.display = "none";
+            } else if (cloudData.type === 'file') {
+                previewImg.style.display = "none";
+                previewEl.style.display = "block";
+                previewEl.textContent = "📄 " + (cloudData.name || "Unknown File");
+                fileDetails.style.display = "block";
+                fileDetails.textContent = `Type: ${cloudData.mime || 'Binary'}`;
+            } else {
+                previewImg.style.display = "none";
+                previewEl.style.display = "block";
+                fileDetails.style.display = "none";
+                const txt = cloudData.content || "";
+                previewEl.textContent = txt.length > 80 ? txt.substring(0, 80) + "..." : (txt || "Empty");
+            }
         });
 
-        // UPLOAD LOGIC (PUSH)
+        const blobToBase64 = blob => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+
+        // UPLOAD LOGIC
         async function pushToCloud() {
             try {
-                const text = await navigator.clipboard.readText();
-                if (!text) return notify("Clipboard is empty", "error");
-                if (text === cloudText) return notify("Already in sync");
-                
-                await set(clipRef, text);
-                notify("Cloud Updated! 🚀");
+                // PC/Clipboard support
+                const items = await navigator.clipboard.read();
+                for (const item of items) {
+                    const imageType = item.types.find(type => type.startsWith('image/'));
+                    if (imageType) {
+                        const blob = await item.getType(imageType);
+                        const base64 = await blobToBase64(blob);
+                        if (base64.length > 5 * 1024 * 1024) return notify("Image too large (>5MB)", "error");
+                        await set(clipRef, { type: 'image', content: base64 });
+                        return notify("Image Pushed! 🖼️");
+                    }
+                    
+                    if (item.types.includes('text/plain')) {
+                        const blob = await item.getType('text/plain');
+                        const text = await blob.text();
+                        if (text === cloudData.content) return notify("Already in sync");
+                        await set(clipRef, { type: 'text', content: text });
+                        return notify("Text Pushed! 🚀");
+                    }
+                }
             } catch (err) {
-                notify("Click to grant permission", "error");
+                // If clipboard fails (like on mobile where reading is restricted), try file picker
+                fileInput.click();
             }
         }
 
-        // DOWNLOAD LOGIC (PULL)
+        // Handle File Input (Fallback/Explicit files)
+        fileInput.onchange = async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            if (file.size > 5 * 1024 * 1024) {
+                return notify("File too large (>5MB)", "error");
+            }
+
+            const base64 = await blobToBase64(file);
+            const type = file.type.startsWith('image/') ? 'image' : 'file';
+            
+            await set(clipRef, { 
+                type: type, 
+                content: base64, 
+                name: file.name,
+                mime: file.type 
+            });
+            notify(`${type === 'image' ? 'Image' : 'File'} Pushed! 📁`);
+            fileInput.value = ""; // Clear for next use
+        };
+
+        // DOWNLOAD LOGIC
         async function pullFromCloud() {
-            if (!cloudText) return notify("Cloud is empty", "error");
+            if (!cloudData.content) return notify("Cloud is empty", "error");
+            
             try {
-                await navigator.clipboard.writeText(cloudText);
-                notify("Device Updated! ✅");
+                if (cloudData.type === 'image' || cloudData.type === 'file') {
+                    const response = await fetch(cloudData.content);
+                    const blob = await response.blob();
+
+                    if (cloudData.type === 'image') {
+                        try {
+                            // Try writing to clipboard if it's an image
+                            await navigator.clipboard.write([
+                                new ClipboardItem({ [blob.type]: blob })
+                            ]);
+                            notify("Image Downloaded to Clipboard! 🖼️");
+                        } catch (e) {
+                            // Fallback to file download
+                            triggerDownload(blob, cloudData.name || 'image.png');
+                        }
+                    } else {
+                        // For generic files, trigger a browser download
+                        triggerDownload(blob, cloudData.name || 'file.bin');
+                    }
+                } else {
+                    await navigator.clipboard.writeText(cloudData.content);
+                    notify("Text Downloaded! ✅");
+                }
             } catch (err) {
-                notify("Failed to write to clipboard", "error");
+                console.error(err);
+                notify("Download failed", "error");
             }
         }
 
-        // Event Listeners
+        function triggerDownload(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            notify("File Downloaded! 📥");
+        }
+
         document.getElementById('btn-push').addEventListener('click', pushToCloud);
         document.getElementById('btn-pull').addEventListener('click', pullFromCloud);
 
-        // Auto-Sync for PC on focus
         if (!isMobile) {
             window.addEventListener('focus', pushToCloud);
         }
